@@ -1,162 +1,239 @@
 #!/usr/bin/env python3
-"""
-Script interactif : convertit une page Web en EPUB.
+# -*- coding: utf-8 -*-
 
-Il télécharge le contenu principal de la page,
-intègre toutes les images localement,
-et ajoute une couverture si tu fournis une URL.
-
-Aucune dépendance supplémentaire par rapport à la version précédente.
-"""
-
-import re
-import sys
-from urllib.parse import urljoin, urlparse
 import requests
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup
 from ebooklib import epub
+from PIL import Image
+from io import BytesIO
+from urllib.parse import urljoin
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; epub-generator/1.2; +mailto:you@example.com)"}
+print("📚 Convertisseur Web → EPUB")
+print("=" * 50)
 
+# =====================================================
+# ENTRÉES UTILISATEUR
+# =====================================================
+url = input("➡️  URL de la page : ").strip()
+if not url:
+    print("❌ URL obligatoire")
+    exit(1)
 
-def fetch_url(url):
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return r
+cover_url = input("🖼️  URL de la couverture (optionnel) : ").strip()
 
+output = input("💾 Nom du fichier : ").strip()
+if not output:
+    output = "livre"
+if not output.endswith('.epub'):
+    output += '.epub'
 
-def clean_soup(soup):
-    for s in soup(["script", "style", "noscript", "iframe", "nav", "aside", "footer", "header"]):
-        s.decompose()
-    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
-        comment.extract()
-    for selector in ["[class*=ad]", "[id*=ad]", "[class*=cookie]", "[id*=cookie]", ".share", ".social", ".meta"]:
-        for node in soup.select(selector):
-            node.decompose()
+print(f"\n⏳ Création de {output}...\n")
 
+# =====================================================
+# TÉLÉCHARGEMENT DE LA PAGE
+# =====================================================
+print("🌐 Téléchargement de la page...")
+try:
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, 'html.parser')
+except Exception as e:
+    print(f"❌ Erreur : {e}")
+    exit(1)
 
-def extract_main_content(soup):
-    article = soup.find("article")
-    if article:
-        return article
-    main = soup.find("main")
-    if main:
-        return main
-    candidates = soup.find_all(True, id=re.compile(r"(content|main|article|post)", re.I))
-    if candidates:
-        return max(candidates, key=lambda t: len(t.get_text(" ", strip=True)))
-    return soup.body or soup
+# Extraction du titre
+title = "Sans titre"
+h1 = soup.find('h1')
+if h1:
+    title = h1.get_text(strip=True)
 
+print(f"📖 Titre : {title}")
 
-def get_meta(soup, name):
-    tag = soup.find("meta", property=name) or soup.find("meta", attrs={"name": name})
-    return tag["content"].strip() if tag and tag.get("content") else None
+# Extraction du contenu
+article = soup.find('div', class_='entry-content')
+if not article:
+    article = soup.find('article')
+if not article:
+    print("❌ Impossible de trouver le contenu")
+    exit(1)
 
+# =====================================================
+# CRÉATION DE L'EPUB
+# =====================================================
+book = epub.EpubBook()
+book.set_identifier(f'id{hash(url)}')
+book.set_title(title)
+book.set_language('fr')
+book.add_author('Web')
 
-def download_and_embed_images(soup, base_url, book):
-    for idx, img in enumerate(soup.find_all("img"), 1):
-        src = img.get("src")
-        if not src:
-            img.decompose()
-            continue
-        abs_url = urljoin(base_url, src)
+# =====================================================
+# CSS
+# =====================================================
+css = '''
+body {
+    font-family: serif;
+    line-height: 1.6;
+    margin: 2em;
+}
+h1 {
+    font-size: 2em;
+    margin-bottom: 1em;
+}
+img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 1em auto;
+}
+p {
+    margin: 0.5em 0;
+}
+'''
+
+css_file = epub.EpubItem(
+    uid='style',
+    file_name='style.css',
+    media_type='text/css',
+    content=css.encode('utf-8')
+)
+book.add_item(css_file)
+
+# =====================================================
+# COUVERTURE
+# =====================================================
+if cover_url:
+    print(f"🖼️  Téléchargement de la couverture...")
+    try:
+        cover_response = requests.get(cover_url, timeout=30)
+        cover_response.raise_for_status()
+        
+        # Conversion en PNG
+        img = Image.open(BytesIO(cover_response.content))
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # Redimensionner si nécessaire
+        if img.height > 1600:
+            ratio = 1600 / img.height
+            new_size = (int(img.width * ratio), 1600)
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+        
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        cover_data = buffer.getvalue()
+        
+        # Méthode simple qui marche
+        book.set_cover('cover.png', cover_data)
+        
+        print("✅ Couverture ajoutée")
+    except Exception as e:
+        print(f"⚠️  Erreur couverture : {e}")
+
+# =====================================================
+# IMAGES DE L'ARTICLE
+# =====================================================
+images = article.find_all('img')
+print(f"📸 Traitement de {len(images)} images...")
+
+for i, img_tag in enumerate(images):
+    src = img_tag.get('src')
+    if not src:
+        continue
+    
+    # Normalisation de l'URL
+    if src.startswith('//'):
+        src = 'https:' + src
+    elif src.startswith('/'):
+        src = urljoin(url, src)
+    elif not src.startswith('http'):
+        src = urljoin(url, src)
+    
+    print(f"  [{i+1}/{len(images)}] {src[:50]}...")
+    
+    try:
+        img_response = requests.get(src, timeout=20)
+        img_response.raise_for_status()
+        img_data = img_response.content
+        
+        # Conversion en JPEG
         try:
-            r = fetch_url(abs_url)
-            data = r.content
-            ext = "jpg"
-            parsed = urlparse(abs_url)
-            if "." in parsed.path:
-                ext = parsed.path.split(".")[-1].split("?")[0].lower()
-                if ext not in ["jpg", "jpeg", "png", "gif", "webp"]:
-                    ext = "jpg"
-            fname = f"image_{idx}.{ext}"
-            img_item = epub.EpubItem(
-                uid=f"img_{idx}",
-                file_name=f"images/{fname}",
-                media_type=f"image/{'jpeg' if ext in ['jpg', 'jpeg'] else ext}",
-                content=data,
-            )
-            book.add_item(img_item)
-            img["src"] = f"images/{fname}"
-        except Exception as e:
-            print(f"⚠️  Impossible de télécharger {abs_url}: {e}")
-            img.decompose()
+            img = Image.open(BytesIO(img_data))
+            if img.mode not in ('RGB', 'L'):
+                img = img.convert('RGB')
+            
+            # Redimensionner si trop large
+            if img.width > 1200:
+                ratio = 1200 / img.width
+                new_size = (1200, int(img.height * ratio))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+            
+            buffer = BytesIO()
+            img.save(buffer, format='JPEG', quality=85)
+            img_data = buffer.getvalue()
+        except:
+            pass
+        
+        # Ajout au livre
+        filename = f'images/img_{i}.jpg'
+        img_item = epub.EpubItem(
+            uid=f'img{i}',
+            file_name=filename,
+            media_type='image/jpeg',
+            content=img_data
+        )
+        book.add_item(img_item)
+        
+        # Mise à jour du HTML
+        img_tag['src'] = filename
+        
+    except Exception as e:
+        print(f"    ⚠️  Erreur : {e}")
 
+print(f"✅ Images traitées")
 
-def build_epub(url, cover_url, output_filename):
-    page = fetch_url(url)
-    soup = BeautifulSoup(page.text, "lxml")
+# =====================================================
+# CHAPITRE HTML
+# =====================================================
+# Nettoyage
+for tag in article.find_all(['script', 'style']):
+    tag.decompose()
 
-    title = (
-        get_meta(soup, "og:title")
-        or get_meta(soup, "twitter:title")
-        or (soup.title.string.strip() if soup.title else "Sans titre")
-    )
-    author = get_meta(soup, "author") or get_meta(soup, "article:author") or "Inconnu"
-    pubdate = get_meta(soup, "article:published_time") or get_meta(soup, "og:updated_time") or ""
+# Création du chapitre
+html_content = f'''<html>
+<head>
+<title>{title}</title>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<h1>{title}</h1>
+{article}
+</body>
+</html>'''
 
-    clean_soup(soup)
-    content_block = extract_main_content(soup)
-    if not content_block:
-        print("❌ Aucun contenu trouvé sur cette page.")
-        sys.exit(1)
+chapter = epub.EpubHtml(
+    title=title,
+    file_name='chapitre.xhtml',
+    lang='fr'
+)
+chapter.set_content(html_content)
+book.add_item(chapter)
 
-    book = epub.EpubBook()
-    book.set_identifier(url)
-    book.set_title(title)
-    book.add_author(author)
-    book.set_language("fr")
+# =====================================================
+# STRUCTURE
+# =====================================================
+book.toc = (epub.Link('chapitre.xhtml', title, 'chap'),)
+book.spine = ['nav', chapter]
 
-    download_and_embed_images(content_block, url, book)
+book.add_item(epub.EpubNcx())
+book.add_item(epub.EpubNav())
 
-    # couverture
-    if cover_url:
-        try:
-            c = fetch_url(cover_url)
-            cover_bytes = c.content
-            ext = "jpg"
-            if "." in urlparse(cover_url).path:
-                ext = urlparse(cover_url).path.split(".")[-1].split("?")[0] or "jpg"
-            book.set_cover(f"cover.{ext}", cover_bytes)
-        except Exception as e:
-            print("⚠️  Échec de téléchargement de la couverture :", e)
-
-    safe_pubdate = f"<p><em>{pubdate}</em></p>" if pubdate else ""
-    chapter_html = f"<h1>{title}</h1>{safe_pubdate}{str(content_block)}"
-    chapter = epub.EpubHtml(title=title, file_name="chapter.xhtml", lang="fr")
-    chapter.content = chapter_html
-
-    css = """
-    body { font-family: serif; line-height: 1.5; margin: 1em; }
-    img { max-width: 100%; height: auto; display: block; margin: 0.5em auto; }
-    h1 { text-align: center; margin-bottom: 1em; }
-    """
-    style_item = epub.EpubItem(uid="style", file_name="style.css", media_type="text/css", content=css)
-    book.add_item(style_item)
-    book.add_item(chapter)
-    book.add_item(epub.EpubNcx())
-    book.add_item(epub.EpubNav())
-    book.toc = [epub.Link("chapter.xhtml", title, "chapter")]
-    book.spine = ["nav", chapter]
-
-    epub.write_epub(output_filename, book)
-    print(f"\n✅ EPUB créé : {output_filename}\n")
-
-
-def main():
-    print("📚 Convertisseur Web → EPUB")
-    print("----------------------------")
-    url = input("➡️  Adresse de la page à convertir : ").strip()
-    if not url:
-        print("❌ URL obligatoire.")
-        sys.exit(1)
-
-    cover_url = input("🖼️  URL de l'image de couverture (laisser vide si aucune) : ").strip() or None
-    output_filename = input("💾 Nom du fichier EPUB de sortie (ex: article.epub) : ").strip() or "article.epub"
-
-    print("\n⏳ Téléchargement et création de l’EPUB...\n")
-    build_epub(url, cover_url, output_filename)
-
-
-if __name__ == "__main__":
-    main()
+# =====================================================
+# EXPORT
+# =====================================================
+print(f"\n💾 Écriture du fichier...")
+try:
+    epub.write_epub(output, book, {})
+    print(f"🎉 EPUB créé : {output}")
+except Exception as e:
+    print(f"❌ Erreur : {e}")
+    exit(1)

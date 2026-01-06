@@ -21,14 +21,6 @@ if not url:
 
 cover_url = input("🖼️  URL de la couverture (optionnel) : ").strip()
 
-output = input("💾 Nom du fichier : ").strip()
-if not output:
-    output = "livre"
-if not output.endswith('.epub'):
-    output += '.epub'
-
-print(f"\n⏳ Création de {output}...\n")
-
 # =====================================================
 # TÉLÉCHARGEMENT DE LA PAGE
 # =====================================================
@@ -43,9 +35,24 @@ except Exception as e:
 
 # Extraction du titre
 title = "Sans titre"
-h1 = soup.find('h1')
-if h1:
-    title = h1.get_text(strip=True)
+
+# Essayer d'abord la balise <title>
+title_tag = soup.find('title')
+if title_tag:
+    title = title_tag.get_text(strip=True)
+    # Nettoyer le titre (souvent "Titre | Nom du site")
+    if '|' in title:
+        title = title.split('|')[0].strip()
+    elif '–' in title:
+        title = title.split('–')[0].strip()
+    elif '-' in title and len(title.split('-')) == 2:
+        title = title.split('-')[0].strip()
+
+# Si pas de titre ou titre générique, essayer h1
+if not title or title == "Sans titre":
+    h1 = soup.find('h1')
+    if h1:
+        title = h1.get_text(strip=True)
 
 print(f"📖 Titre : {title}")
 
@@ -56,6 +63,22 @@ if not article:
 if not article:
     print("❌ Impossible de trouver le contenu")
     exit(1)
+
+# =====================================================
+# NOM DU FICHIER (après avoir récupéré le titre)
+# =====================================================
+# Nettoyer le titre pour en faire un nom de fichier valide
+safe_title = title
+for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+    safe_title = safe_title.replace(char, '-')
+
+output = input(f"💾 Nom du fichier [{safe_title}] : ").strip()
+if not output:
+    output = safe_title
+if not output.endswith('.epub'):
+    output += '.epub'
+
+print(f"\n⏳ Création de {output}...\n")
 
 # =====================================================
 # CRÉATION DE L'EPUB
@@ -198,7 +221,29 @@ print(f"✅ Images traitées")
 for tag in article.find_all(['script', 'style']):
     tag.decompose()
 
+# Correction des balises auto-fermantes mal formées
+# Convertir <br> en <br/>, <img> en <img/>, etc.
+for br in article.find_all('br'):
+    br.replace_with(soup.new_tag('br'))
+
+for hr in article.find_all('hr'):
+    hr.replace_with(soup.new_tag('hr'))
+
+# Supprimer les attributs qui peuvent causer des problèmes
+for tag in article.find_all(True):
+    # Supprimer les attributs de style inline qui peuvent être mal formés
+    if tag.has_attr('style'):
+        del tag['style']
+    # Supprimer les attributs de taille fixe
+    if tag.name == 'img':
+        for attr in ['width', 'height']:
+            if tag.has_attr(attr):
+                del tag[attr]
+
 # Création du chapitre
+# prettify() va formater correctement toutes les balises auto-fermantes
+article_html = article.prettify()
+
 html_content = f'''<html>
 <head>
 <title>{title}</title>
@@ -206,7 +251,7 @@ html_content = f'''<html>
 </head>
 <body>
 <h1>{title}</h1>
-{article}
+{article_html}
 </body>
 </html>'''
 

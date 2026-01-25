@@ -1,12 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-**📚 Key Documentation Files:**
-- **[CLAUDE.md](CLAUDE.md)** - Project overview, objectives, architecture, session management
-- **[SESSION_STATE.md](SESSION_STATE.md)** - Current session status and recent work
-- **[.claude/REFERENCE.md](.claude/REFERENCE.md)** - Quick reference: URLs, credentials, cmdlets
-- **[README.md](README.md)** - Installation and setup guide
+This file provides guidance to Claude Code when working with code in this repository.
 
 ---
 
@@ -16,353 +10,543 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Tech Stack:** [To be filled]  
 **Primary Language(s):** [To be filled]  
 **Key Dependencies:** [To be filled]  
-**Architecture Pattern:** [To be filled]  
-**Development Environment:** [To be filled]
+**Architecture Pattern:** [To be filled]
 
 ---
 
-## File Encoding Standards
+## ⚠️ Development Philosophy
 
-- **All files:** UTF-8 with LF (Unix) line endings
-- **Timestamps:** ISO 8601 (YYYY-MM-DD HH:mm)
-- **Time format:** 24-hour (HH:mm)
+### Golden Rule: Incremental Development
+
+**NEVER write large amounts of code without validation.**
+
+```
+One module → Test → User validates → Next module
+```
+
+**Per iteration limits:**
+- 1-3 related files maximum
+- ~50-150 lines of new code
+- Must be independently testable
+
+### Mandatory Stop Points
+
+Claude MUST stop and wait for user validation after:
+- Database connection/schema changes
+- Authentication/authorization code
+- Each API endpoint or route group
+- File system or external service integrations
+- Any security-sensitive code
+
+**Stop format:**
+```
+✅ [Module] complete. 
+
+**Test it:**
+1. [Step 1]
+2. [Step 2]
+Expected: [Result]
+
+Waiting for your validation before continuing.
+```
+
+### Code Hygiene Rules (MANDATORY)
+
+**Goal: Application must be portable and deployable anywhere without code changes.**
+
+**NEVER hardcode in source files:**
+- ❌ Passwords, API keys, tokens, secrets
+- ❌ Database credentials or connection strings
+- ❌ Absolute paths (`C:\Users\...`, `/home/user/...`)
+- ❌ IP addresses, hostnames, ports (production)
+- ❌ Email addresses, usernames for services
+- ❌ Environment-specific URLs (dev, staging, prod)
+
+**ALWAYS use instead:**
+- ✅ Environment variables (`.env` files, never committed)
+- ✅ Configuration files (with `.example` templates)
+- ✅ Relative paths or configurable base paths
+- ✅ Secret managers for production (Vault, AWS Secrets, etc.)
+
+**Project must include:**
+```
+├── .env.example          # Template with ALL variables, placeholder values
+├── .gitignore            # Excludes .env, secrets, logs, build artifacts
+├── config/               # Centralized configuration module
+│   ├── index.js          # Loads from env vars with defaults
+│   └── config.example.json  # Template if using JSON config
+└── README.md             # Setup instructions with env vars list
+```
+
+**Portability Checklist:**
+- [ ] App starts with only `.env` configuration (no code edits)
+- [ ] All paths relative or from env vars (`DATA_DIR`, `LOG_PATH`)
+- [ ] Database connection string from env (`DATABASE_URL`)
+- [ ] External service URLs from env (`API_BASE_URL`, `SMTP_HOST`)
+- [ ] Port configurable (`PORT=3000`)
+- [ ] Works on Windows, Linux, macOS (if cross-platform)
+
+**Config Module Pattern:**
+```javascript
+// config/index.js - Example pattern
+module.exports = {
+  port: process.env.PORT || 3000,
+  db: {
+    url: process.env.DATABASE_URL || 'sqlite://local.db',
+  },
+  dataDir: process.env.DATA_DIR || './data',
+  logLevel: process.env.LOG_LEVEL || 'info',
+};
+```
+
+### Development Order (Enforce)
+
+1. **Foundation first** — Config, DB, Auth
+2. **Test foundation** — Don't continue if broken
+3. **Core features** — One by one, tested
+4. **Advanced features** — Only after core works
+
+### File Size Guidelines
+
+**Target sizes (lines of code):**
+- **< 300** : ideal
+- **300-500** : acceptable
+- **500-800** : consider splitting
+- **> 800** : must split
+
+**When to split a file:**
+- Multiple unrelated concerns in the same file
+- Hard to find functions/methods
+- File has too many responsibilities
+- Scrolling endlessly to find something
+
+**Naming convention for split files:**
+```
+app.go           → Core struct, New(), Run(), Shutdown()
+app_jobs.go      → Job-related methods
+app_sync.go      → Sync-related methods
+app_settings.go  → Config/settings methods
+```
+
+**Benefits of smaller files:**
+- Easier to navigate and understand
+- Cleaner git diffs
+- Less merge conflicts
+- Faster incremental compilation
+- More focused tests
 
 ---
 
-## Claude Code Session Management
+## Session Management
 
-### 🚀 Quick Start (TL;DR)
+### Quick Start
 
 **Continue work:** `"continue"` or `"let's continue"`  
-**New session:** `"new session: Feature Name"` or `"start new session"`
+**New session:** `"new session: Feature Name"`
 
-**Claude handles everything automatically** - no need to manage session numbers or files manually.
+### File Structure
 
----
+- **SESSION_STATE.md** (root) — Overview and session index
+- **.claude/sessions/SESSION_XXX_[name].md** — Detailed session logs
 
-### Session File Structure
+**Naming:** `SESSION_001_project_setup.md`
 
-**Two-Tier System:**
-1. **SESSION_STATE.md** (root) - Overview and index of all sessions
-2. **.claude/sessions/SESSION_XXX_[name].md** - Detailed session files
+### SESSION_STATE.md Header (Required)
 
-**Naming:** `SESSION_001_project_setup.md` (three digits, 001-999)
+SESSION_STATE.md **must** start with this reminder block:
 
-**Session Limits (Recommendations):**
-- Max tasks: 20-25 per session
-- Max files modified: 15-20 per session
-- Recommended duration: 2-4 hours
+```markdown
+# [Project] - Session State
 
----
+> **Claude : Appliquer le protocole de session (CLAUDE.md)**
+> - Créer/mettre à jour la session en temps réel
+> - Valider après chaque module avec : ✅ [Module] complete. **Test it:** [...] Waiting for validation.
+> - Ne pas continuer sans validation utilisateur
+```
 
-### Automatic Session Workflow
+This ensures Claude applies the session protocol when the user asks to read SESSION_STATE.md.
 
-#### 1. Session Start
-- Read CLAUDE.md, SESSION_STATE.md, current session file
-- Display status and next tasks
-
-#### 2. During Development (AUTO-UPDATE)
-**Individual Session File:**
-- Mark completed tasks immediately
-- Log technical decisions and issues in real-time
-- Track all modified files
-- Document all code created
-
-**SESSION_STATE.md:**
-- Update timestamp and session reference
-- Update current status
-- Add to recent sessions summary
-
-#### 3. Session File Template
+### Session Template
 
 ```markdown
 # Session XXX: [Feature Name]
 
-## Date: YYYY-MM-DD
-## Duration: [Start - Current]
-## Goal: [Brief description]
+## Meta
+- **Date:** YYYY-MM-DD
+- **Goal:** [Brief description]
+- **Status:** In Progress / Blocked / Complete
 
-## Completed Tasks
-- [x] Task 1 (HH:mm)
-- [ ] Task 2 - In progress
-
-## Current Status
-**Currently working on:** [Task]  
+## Current Module
+**Working on:** [Module name]
 **Progress:** [Status]
 
-## Next Steps
-1. [ ] Next immediate task
-2. [ ] Following task
+## Module Checklist
+- [ ] Module planned (files, dependencies, test procedure)
+- [ ] Code written
+- [ ] Self-tested by Claude
+- [ ] User validated ← **REQUIRED before next module**
+
+## Completed Modules
+| Module | Validated | Date |
+|--------|-----------|------|
+| DB Connection | ✅ | YYYY-MM-DD |
+| Auth | ✅ | YYYY-MM-DD |
+
+## Next Modules (Prioritized)
+1. [ ] [Next module]
+2. [ ] [Following module]
 
 ## Technical Decisions
-- **Decision:** [What]
-  - **Reason:** [Why]
-  - **Trade-offs:** [Pros/cons]
+- **[Decision]:** [Reason]
 
 ## Issues & Solutions
-- **Issue:** [Problem]
-  - **Solution:** [Resolution]
-  - **Root cause:** [Why]
+- **[Issue]:** [Solution]
 
 ## Files Modified
-### Created
-- path/file.js - [Description]
-### Updated
-- path/file.js - [Changes]
-
-## Documentation Created/Updated
-- [ ] [file].EXPLAIN.md - Created/Updated
-- Files documented: X/Y (Z%)
-
-## Dependencies Added
-- package@version - [Reason]
-
-## Testing Notes
-- [ ] Tests written/passing
-- **Coverage:** [%]
-
-## Session Summary
-[Paragraph summarizing accomplishments]
+- `path/file.ext` — [What/Why]
 
 ## Handoff Notes
-- **Critical context:** [Must-know info]
-- **Blockers:** [If any]
-- **Next steps:** [Recommendations]
+[Critical context for next session]
 ```
 
----
+### Session Rules
 
-### Session Management Rules
+**MUST DO:**
+1. Read CLAUDE.md and current session first
+2. Update session file in real-time
+3. Wait for validation after each module
+4. Fix bugs before new features
 
-#### MANDATORY Actions:
-1. Always read CLAUDE.md first for context
-2. Always read current session file
-3. Update session in real-time as tasks complete
-4. Document all code (headers, functions, .EXPLAIN.md)
-5. Never lose context between messages
-6. Auto-save progress every 10-15 minutes
-7. Verify documentation before marking tasks complete
-
-#### When to Create New Session:
+**NEW SESSION when:**
 - New major feature/module
-- Completed session goal
+- Current session goal complete
 - Different project area
-- After long break
-- Approaching session limits
 
 ---
 
-### Common Commands
+## Module Workflow
 
-**Continue:** "continue", "let's continue", "keep going"  
-**New session:** "new session: [name]", "start new session"  
-**Save:** "save progress", "checkpoint"  
-**Update:** "update session", "update SESSION_STATE.md"  
-**Document:** "document files", "create EXPLAIN files"  
-**Audit:** "check documentation", "audit docs"
+### 1. Plan (Before Coding)
+
+```markdown
+📋 **Module:** [Name]
+📝 **Purpose:** [One sentence]
+📁 **Files:** [List]
+🔗 **Depends on:** [Previous modules]
+🧪 **Test procedure:** [How to verify]
+🔒 **Security concerns:** [If any]
+```
+
+### 2. Implement
+
+- Write minimal working code
+- Include error handling
+- Document as you go (headers, comments)
+
+### 3. Validate
+
+**Functional:**
+- [ ] Runs without errors
+- [ ] Expected output verified
+- [ ] Errors handled gracefully
+
+**Security (if applicable):**
+- [ ] Input validated
+- [ ] No hardcoded secrets, paths, or credentials
+- [ ] Parameterized queries (SQL)
+- [ ] Output encoded (XSS)
+
+### 4. User Confirmation
+
+**⚠️ DO NOT proceed until user says "OK", "validated", or "continue"**
+
+---
+
+## Build Order Templates
+
+### Web Application
+
+```
+Stage 1: Foundation (validate before Stage 2)
+├── [ ] Project structure + config module → starts without error
+├── [ ] .env.example with all variables documented
+├── [ ] Database connection (from env var) → can connect
+├── [ ] Auth (register/login/logout) → full flow works
+├── [ ] Session/JWT management → persists correctly
+└── [ ] SECURITY REVIEW
+
+Stage 2: Core (validate before Stage 3)
+├── [ ] User profile CRUD
+├── [ ] Basic API routes
+└── [ ] Error handling middleware
+
+Stage 3: Features
+├── [ ] Feature A
+├── [ ] Feature B
+└── [ ] ...
+
+Stage 4: Pre-Launch (MANDATORY)
+├── [ ] Full security audit (see checklist)
+├── [ ] Dependency audit (npm audit, etc.)
+├── [ ] Penetration testing
+├── [ ] Portability test (deploy on clean machine)
+├── [ ] DEPLOYMENT.md written
+├── [ ] All issues fixed or documented
+└── [ ] Final validation
+```
+
+### API Service
+
+```
+Stage 1: Foundation
+├── [ ] Config module + .env.example
+├── [ ] Database + migrations (connection from env)
+├── [ ] Auth middleware
+└── [ ] Health check endpoint
+
+Stage 2: Core Endpoints
+├── [ ] Resource A (CRUD)
+├── [ ] Resource B (CRUD)
+└── [ ] Relationships
+
+Stage 3: Advanced
+├── [ ] Search/filtering
+├── [ ] Pagination
+└── [ ] Rate limiting
+
+Stage 4: Pre-Launch (MANDATORY)
+├── [ ] Full security audit
+├── [ ] Dependency vulnerabilities checked
+├── [ ] API penetration testing
+├── [ ] Portability test (fresh environment)
+├── [ ] DEPLOYMENT.md written
+├── [ ] Rate limiting verified
+└── [ ] Final validation
+```
+
+### DEPLOYMENT.md Template
+
+```markdown
+# Deployment Guide
+
+## Requirements
+- [Runtime] v[version]
+- [Database] v[version]
+- [Other dependencies]
+
+## Environment Variables
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| PORT | No | 3000 | Server port |
+| DATABASE_URL | Yes | - | Database connection string |
+| ... | ... | ... | ... |
+
+## Quick Start
+1. Clone repository
+2. Copy `.env.example` to `.env`
+3. Edit `.env` with your values
+4. Run `[install command]`
+5. Run `[start command]`
+
+## Production Deployment
+[Platform-specific instructions]
+
+## Troubleshooting
+[Common issues and solutions]
+```
 
 ---
 
 ## Documentation Standards
 
-### Overview
-**Every code file MUST have complete documentation before task is marked complete.**
+### File Header (Required)
 
-### Required Documentation Elements
-
-#### 1. File Header (All Files)
-```language
-/**
- * @file filename.ext
- * @description Brief file purpose
- * @session SESSION_XXX
- * @created YYYY-MM-DD
- * @author [name/team]
- */
-```
-
-#### 2. Function Documentation
 ```javascript
 /**
- * Brief function description
- * 
- * @param {type} paramName - Parameter description
- * @returns {type} Return description
- * @throws {Error} Error conditions
- * @example
- * functionName(arg) // => result
- * @session SESSION_XXX
+ * @file filename.ext
+ * @description Brief purpose
+ * @created YYYY-MM-DD
  */
 ```
 
-#### 3. .EXPLAIN.md Files (Scripts/Modules)
-**Create for:** All scripts, complex modules, utilities
+### Function Documentation (Required)
 
-**Template:**
+```javascript
+/**
+ * Brief description
+ * @param {type} name - Description
+ * @returns {type} Description
+ */
+```
+
+### .EXPLAIN.md Files
+
+Create for complex scripts/modules:
+
 ```markdown
-# [Filename] - Explanation
+# [Filename]
 
 ## Purpose
-[What this does]
-
-## How It Works
-[Step-by-step explanation]
+[What and why]
 
 ## Usage
-```language
-[Code examples]
-```
+[Code example]
 
 ## Key Functions
-### functionName()
-[Description, params, returns]
-
-## Error Handling
-[Common issues and solutions]
-
-## Session History
-- SESSION_XXX: Created
+[List with brief descriptions]
 ```
 
 ---
 
-### Documentation Checklist
-Before marking any task complete, verify:
-- [ ] File header present
-- [ ] All functions documented (description, params, returns, examples)
-- [ ] All classes documented (properties, methods, usage)
-- [ ] Complex sections explained
-- [ ] Inline comments for non-obvious logic
-- [ ] .EXPLAIN.md created/updated (for scripts)
-- [ ] Error cases documented
+## Pre-Launch Security Audit
+
+### When to Run
+
+**MANDATORY before any deployment or "project complete" status.**
+
+Plan this phase from the start — it's not optional.
+
+### Security Audit Checklist
+
+#### 1. Code Review (Full Scan)
+- [ ] No hardcoded secrets (API keys, passwords, tokens)
+- [ ] No hardcoded paths (use relative or configurable)
+- [ ] No hardcoded credentials or connection strings
+- [ ] No sensitive data in logs
+- [ ] All user inputs validated and sanitized
+- [ ] No debug/dev code left in production
+- [ ] `.env.example` present with all required variables
+- [ ] `.gitignore` excludes `.env` and sensitive files
+
+#### 2. OWASP Top 10 Check
+- [ ] **Injection** — SQL, NoSQL, OS command injection protected
+- [ ] **Broken Auth** — Strong passwords, session management, MFA if needed
+- [ ] **Sensitive Data Exposure** — Encryption at rest and in transit (HTTPS)
+- [ ] **XXE** — XML parsing secured (if applicable)
+- [ ] **Broken Access Control** — Authorization verified on all routes
+- [ ] **Security Misconfiguration** — Default credentials removed, error messages generic
+- [ ] **XSS** — Output encoding, CSP headers
+- [ ] **Insecure Deserialization** — Untrusted data not deserialized
+- [ ] **Vulnerable Components** — Dependencies updated, no known CVEs
+- [ ] **Insufficient Logging** — Security events logged, logs protected
+
+#### 3. Dependency Audit
+```bash
+# Run appropriate command for your stack:
+npm audit                    # Node.js
+pip-audit                    # Python
+cargo audit                  # Rust
+dotnet list package --vulnerable  # .NET
+```
+- [ ] All critical/high vulnerabilities addressed
+- [ ] Outdated packages updated or justified
+
+#### 4. Online Vulnerability Research
+- [ ] Search CVE databases for stack components
+- [ ] Check GitHub security advisories for dependencies
+- [ ] Review recent security news for frameworks used
+
+**Resources:**
+- https://cve.mitre.org
+- https://nvd.nist.gov
+- https://github.com/advisories
+- https://snyk.io/vuln
+
+#### 5. Basic Penetration Testing
+- [ ] SQL injection attempts on all inputs
+- [ ] XSS attempts on all outputs
+- [ ] Auth bypass attempts (direct URL access, token manipulation)
+- [ ] Rate limiting verified (brute force protection)
+- [ ] File upload restrictions tested (if applicable)
+- [ ] CORS policy verified
+
+#### 6. Configuration Security
+- [ ] HTTPS enforced
+- [ ] Security headers present (HSTS, CSP, X-Frame-Options, etc.)
+- [ ] Cookies secured (HttpOnly, Secure, SameSite)
+- [ ] Error pages don't leak stack traces
+- [ ] Admin interfaces protected/hidden
+
+### Audit Report Template
+
+```markdown
+# Security Audit Report
+
+**Project:** [Name]
+**Date:** YYYY-MM-DD
+**Audited by:** [Claude / Human / Both]
+
+## Summary
+- Critical issues: X
+- High issues: X
+- Medium issues: X
+- Low issues: X
+
+## Findings
+
+### [CRITICAL/HIGH/MEDIUM/LOW] Issue Title
+- **Location:** [File:line or endpoint]
+- **Description:** [What's wrong]
+- **Risk:** [Impact if exploited]
+- **Fix:** [How to resolve]
+- **Status:** [ ] Fixed / [ ] Accepted risk
+
+## Dependency Audit Results
+[Paste output]
+
+## Checklist Completion
+[Copy checklist with status]
+
+## Conclusion
+[ ] Ready for launch
+[ ] Requires fixes before launch
+```
+
+### Post-Audit Actions
+
+1. **Critical/High issues** → Fix immediately, re-test
+2. **Medium issues** → Fix before launch or document accepted risk
+3. **Low issues** → Add to backlog
+4. **Re-run audit** after fixes
 
 ---
 
-## Git Workflow Integration
+## Git Integration
 
 ### Branch Naming
-**Format:** `feature/session-XXX-brief-description`  
-**Examples:** `feature/session-025-user-auth`, `bugfix/session-027-memory-leak`
+`feature/session-XXX-brief-name`
 
-### Commit Messages
+### Commit Message
 ```
-Session XXX: [Brief summary]
+Session XXX: [Summary]
 
-[Details]
-
-Changes:
 - Change 1
 - Change 2
-
-Documentation:
-- Updated [file].EXPLAIN.md
-
-Session: SESSION_XXX
-```
-
-### Tagging Completed Sessions
-```bash
-git tag -a session-XXX-complete -m "Session XXX: [Feature] - Complete"
-git push origin session-XXX-complete
-```
-
-### Session Files in Git
-Commit session files when:
-- Starting new session
-- Completing session
-- End of work day
-- Before switching branches
-
----
-
-## Multi-Developer Guidelines
-
-### Session Locking
-```bash
-# Start work
-echo "Locked by: $(whoami) at $(date)" > .claude/sessions/.session-XXX.lock
-
-# Finish work
-rm .claude/sessions/.session-XXX.lock
-```
-
-### Before Creating New Session
-1. `git pull origin main`
-2. Read SESSION_STATE.md for current number
-3. Check lock files: `ls .claude/sessions/.session-*.lock`
-4. Create next sequential number
-
-### Handoff Protocol
-1. Update session with comprehensive notes
-2. Commit and push
-3. Tag developer in session file
-4. Notify via team channel
-
----
-
-## FAQ
-
-### Session Management
-**Q: Can I rename a session?**  
-A: Yes, update all references in SESSION_STATE.md. Use `git mv`.
-
-**Q: Delete old sessions?**  
-A: Archive first in `.claude/sessions/archive/YYYY/`. Keep 3+ months.
-
-**Q: Search sessions?**  
-A: `grep -r "term" .claude/sessions/`
-
-### Documentation
-**Q: Document everything?**  
-A: Yes. Mandatory for all code. Saves time long-term.
-
-**Q: Experimenting?**  
-A: Minimum: file header + function descriptions. Skip .EXPLAIN.md if temporary.
-
-**Q: How detailed should .EXPLAIN.md be?**  
-A: Detailed enough for unfamiliar developers. Include examples and common issues.
-
-### Git
-**Q: Commit session files?**  
-A: Yes, always. Valuable project history.
-
-**Q: Multiple sessions simultaneously?**  
-A: No. Finish one before starting another. Use branches for context-switch.
-
----
-
-## Quick Reference Commands
-
-### Starting
-```bash
-"continue"                    # Continue existing work
-"new session: Feature Name"   # Start new session
-```
-
-### During Work
-```bash
-"save progress"               # Save current state
-"check documentation"         # Verify doc coverage
-"update session"              # Update session file
-```
-
-### Documentation
-```bash
-"document all files in src/"  # Document directory
-"create missing EXPLAIN files" # Generate .EXPLAIN.md
-"audit documentation"         # Check completeness
 ```
 
 ---
 
-## Additional Resources
+## Quick Commands
 
-- **Quick Start:** [.claude/QUICKSTART.md](.claude/QUICKSTART.md)
-- **Reference:** [.claude/REFERENCE.md](.claude/REFERENCE.md)
-- **Templates:** [.claude/templates/](.claude/templates/)
-- **Examples:** [.claude/sessions/examples/](.claude/sessions/examples/)
+| Command | Action |
+|---------|--------|
+| `continue` | Resume current session |
+| `new session: [name]` | Start new session |
+| `save progress` | Update session file |
+| `validate` | Mark current module as validated |
+| `show plan` | Display remaining modules |
+| `security audit` | Run full pre-launch security checklist |
+| `dependency check` | Audit dependencies for vulnerabilities |
+
+---
+
+## File Standards
+
+- **Encoding:** UTF-8 with LF line endings
+- **Timestamps:** ISO 8601 (YYYY-MM-DD HH:mm)
+- **Time format:** 24-hour
 
 ---
 
 **Last Updated:** YYYY-MM-DD  
-**Version:** 2.0.0
+**Version:** 3.0.0
